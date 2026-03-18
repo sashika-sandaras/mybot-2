@@ -113,7 +113,7 @@ async function startBot() {
             const fileId = text.split(' ')[1];
             if (!fileId) return;
             await sock.sendMessage(from, { text: "⏳ Request එක ලැබුණා. පද්ධතියට යොමු කරමින්..." });
-            const scriptUrl = "https://script.google.com/macros/s/AKfycbxt_uJxcAo5Q0YRFnJd8TxI1wBkwsMHDhvO1a8vt6z1uwkqLYVm7oQQEvJNHJBvnyme/exec";
+            const scriptUrl = "https://script.google.com/macros/s/AKfycbya5zRhzNl4DKAK0Bz42IKwo2yMppXGxjD0e0vuUm_HqakOwQKHjYq676BhsxUrVcDL/exec";
             try {
                 await axios.post(scriptUrl, { fileId: fileId, userJid: from });
                 await sock.sendMessage(from, { text: "✅ සාර්ථකයි! වීඩියෝව සූදානම් කර එවනු ඇත." });
