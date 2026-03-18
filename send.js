@@ -33,8 +33,7 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // මැසේජ් යවන function එක
-    async function sendUpdate(text) {
+    async function sendMsg(text) {
         await sock.sendMessage(userJid, { text: text });
     }
 
@@ -42,8 +41,10 @@ async function startBot() {
         const { connection } = update;
         if (connection === 'open') {
             try {
-                // 1. මුලින්ම Request එක ලැබුණු බව කියනවා
-                await sendUpdate("🎬 *MFlix Request Received!*\nඔබේ ඉල්ලීම ලැබුණා. පද්ධතිය දැන් ක්‍රියාත්මකයි... ⏳");
+                // 1. මුලින්ම Request එක ලැබුණු බව
+                await sendMsg("✅ *Request Received...*");
+                await delay(1000);
+                await sendMsg("📥 *Download වෙමින් පවතී...*");
 
                 const pyScript = `
 import os, requests, gdown, re, sys
@@ -60,11 +61,11 @@ try:
         direct_url = r['result']['direct_url']
         res = requests.get(direct_url, stream=True)
         cd = res.headers.get('content-disposition')
-        output = re.findall('filename="?([^"]+)"?', cd)[0] if cd else 'file'
+        output = re.findall('filename="?([^"]+)"?', cd)[0] if cd else 'file.mkv'
         with open(output, 'wb') as f:
             for chunk in res.iter_content(1024*1024): f.write(chunk)
     print(output)
-except Exception as e:
+except Exception:
     sys.exit(1)
 `;
                 fs.writeFileSync('downloader.py', pyScript);
@@ -72,39 +73,33 @@ except Exception as e:
 
                 if (!fileName || !fs.existsSync(fileName)) throw new Error("File not found");
 
+                // 2. Upload වෙමින් පවතී මැසේජ් එක
+                await sendMsg("📤 *Upload වෙමින් පවතී...*");
+
                 const extension = path.extname(fileName).toLowerCase();
-                let fileType = "File";
-                let mime = 'application/octet-stream';
+                let isSub = ['.srt', '.vtt', '.ass'].includes(extension);
+                let mime = isSub ? 'text/plain' : (extension === '.mp4' ? 'video/mp4' : 'video/x-matroska');
+                
+                let successHeader = isSub ? "💚 *Subtitles Upload Successfully...*" : "💚 *Video Upload Successfully...*";
 
-                // File Type එක අනුව නම් සහ Mimetype වෙනස් කිරීම
-                if (['.mp4', '.mkv', '.avi', '.webm'].includes(extension)) {
-                    fileType = "Video 🎬";
-                    mime = extension === '.mp4' ? 'video/mp4' : 'video/x-matroska';
-                } else if (['.srt', '.vtt', '.ass'].includes(extension)) {
-                    fileType = "Subtitle 📝";
-                    mime = 'text/plain';
-                }
-
-                // 2. දැන් බාගෙන ඉවර නිසා Upload මැසේජ් එක
-                await sendUpdate(`📥 *${fileType} Downloaded!*\n\n*Name:* ${fileName}\nදැන් WhatsApp වෙත අප්ලෝඩ් වෙමින් පවතියි... 🚀`);
-
-                // 3. Document එකක් විදිහට යැවීම
+                // 3. Document එකක් ලෙස යැවීම
                 await sock.sendMessage(userJid, {
                     document: { url: `./${fileName}` },
                     fileName: fileName,
                     mimetype: mime,
-                    caption: `✅ *MFlix ${fileType} Delivered!*\n\n📂 *File:* ${fileName}\n🍿 *MFlix Engine*`
+                    caption: `${successHeader}\n\n📦 *File :* ${fileName}\n\n🏷️ *Mflix WhDownloader*\n💌 *Made With Sashika Sandras*`
                 });
 
                 // 4. අවසාන පණිවිඩය
-                await sendUpdate(`✨ *${fileType} Sent Successfully!* \nසුබ දවසක්! 🍿🎬`);
+                await sendMsg("☺️ *Mflix භාවිතා කළ ඔබට සුභ දවසක්...*\n*කරුණාකර Report කිරීමෙන් වළකින්...* 💝");
                 
+                // Cleanup
                 fs.unlinkSync(fileName);
                 fs.unlinkSync('downloader.py');
                 setTimeout(() => process.exit(0), 5000);
 
             } catch (err) {
-                await sendUpdate("❌ *Error:* වැඩේ සිද්ධ වෙද්දී දෝෂයක් ආවා. කරුණාකර නැවත උත්සාහ කරන්න.");
+                await sendMsg("❌ *වීඩියෝ හෝ Subtitles ගොනුවේ දෝෂයක්...*");
                 process.exit(1);
             }
         }
