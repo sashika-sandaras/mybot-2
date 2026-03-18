@@ -2,19 +2,23 @@ const { default: makeWASocket, useMultiFileAuthState, delay, fetchLatestBaileysV
 const pino = require('pino');
 const fs = require('fs');
 const zlib = require('zlib');
+const axios = require('axios');
 
-async function sendMovie() {
+async function startBot() {
+    // 1. Session එක සකස් කිරීම
     if (!fs.existsSync('./auth_info')) fs.mkdirSync('./auth_info');
-    
     const sessionData = process.env.SESSION_ID;
+    
     try {
-        const base64Data = sessionData.split('Gifted~')[1];
-        const buffer = Buffer.from(base64Data, 'base64');
-        const decodedSession = zlib.gunzipSync(buffer).toString();
-        fs.writeFileSync('./auth_info/creds.json', decodedSession);
+        if (sessionData) {
+            const base64Data = sessionData.split('Gifted~')[1];
+            const buffer = Buffer.from(base64Data, 'base64');
+            const decodedSession = zlib.gunzipSync(buffer).toString();
+            fs.writeFileSync('./auth_info/creds.json', decodedSession);
+            console.log("📂 Session Ready.");
+        }
     } catch (e) {
         console.log("❌ Session Error: " + e.message);
-        process.exit(1);
     }
 
     const { version } = await fetchLatestBaileysVersion();
@@ -24,47 +28,76 @@ async function sendMovie() {
         auth: state,
         version,
         logger: pino({ level: 'silent' }),
-        connectTimeoutMs: 120000, // ලොකු ෆයිල් නිසා ටයිම් එක වැඩි කළා
+        printQRInTerminal: true,
+        connectTimeoutMs: 120000,
         defaultQueryTimeoutMs: 0
     });
 
     sock.ev.on('creds.update', saveCreds);
 
+    // 2. Connection එක ඕපන් වුණාම සිදුවන දේ
     sock.ev.on('connection.update', async (update) => {
         const { connection } = update;
-        
         if (connection === 'open') {
             console.log("✅ WhatsApp Connected!");
-            const userJid = process.env.USER_JID;
 
-            // Python එකෙන් ලියපු filename එක කියවනවා
-            if (fs.existsSync('filename.txt')) {
+            // --- GitHub Action එකෙන් එන Request එකක් නම් වීඩියෝ එක යවනවා ---
+            const userJid = process.env.USER_JID;
+            if (fs.existsSync('filename.txt') && userJid) {
                 const originalFileName = fs.readFileSync('filename.txt', 'utf8').trim();
                 const filePath = `./${originalFileName}`;
 
                 if (fs.existsSync(filePath)) {
-                    console.log(`📤 Sending Original File: ${originalFileName}`);
-                    
+                    console.log(`📤 Sending Movie: ${originalFileName}`);
                     await sock.sendMessage(userJid, { 
                         document: fs.readFileSync(filePath), 
                         mimetype: originalFileName.endsWith('.mkv') ? 'video/x-matroska' : 'video/mp4',
                         fileName: originalFileName,
                         caption: `🎬 *MFlix Original Delivery*\n\n*Name:* ${originalFileName}\n\nරසවිඳින්න! 🍿`
                     });
-
-                    console.log("🚀 Movie Sent Successfully with Original Name!");
+                    console.log("🚀 Successfully Sent!");
                     await delay(10000);
                     process.exit(0);
-                } else {
-                    console.log("❌ Video File not found on server!");
-                    process.exit(1);
                 }
-            } else {
-                console.log("❌ Filename tracking lost!");
-                process.exit(1);
+            }
+        }
+    });
+
+    // 3. යූසර් එවන මැසේජ් වලට රිප්ලයි කිරීම (Trigger Logic)
+    sock.ev.on('messages.upsert', async (m) => {
+        const msg = m.messages[0];
+        if (!msg.message || msg.key.fromMe) return;
+
+        const from = msg.key.remoteJid;
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+
+        // .tv [ID] චෙක් කිරීම
+        if (text.startsWith('.tv')) {
+            const args = text.split(' ');
+            const fileId = args[1];
+
+            if (!fileId) {
+                await sock.sendMessage(from, { text: "❌ කරුණාකර වීඩියෝ ID එක ඇතුළත් කරන්න.\nඋදා: *.tv 16WlbtOM...*" });
+                return;
+            }
+
+            await sock.sendMessage(from, { text: "⏳ ඔබගේ ඉල්ලීම පද්ධතියට ලැබුණා. වීඩියෝව සකසමින් පවතී, මඳක් රැඳී සිටින්න..." });
+
+            try {
+                // ඔයාගේ Google Apps Script URL එක
+                const scriptUrl = "https://script.google.com/macros/s/AKfycbwsOZFItFtdngvqf1C7Ljhg3RftEYew1ZCeVbFQH8DwaqskKD9jVbMDQTxQWbb5iWMN/exec";
+
+                // Google Script එකට Trigger එක යවනවා
+                await axios.post(scriptUrl, {
+                    fileId: fileId,
+                    userJid: from
+                });
+                console.log(`✅ Triggered GitHub for: ${fileId}`);
+            } catch (error) {
+                console.error("❌ Trigger Error:", error.message);
             }
         }
     });
 }
 
-sendMovie();
+startBot();
