@@ -16,13 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       
-      - name: Setup Node.js (for WhatsApp)
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18'
           
-      - name: Setup Python (for Download)
-        uses: ambassadors/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4 # මෙතන තමයි වැරැද්ද තිබුණේ
         with:
           python-version: '3.9'
           
@@ -38,7 +38,6 @@ jobs:
           FILE_ID: ${{ github.event.inputs.file_id }}
           USER_JID: ${{ github.event.inputs.user_jid }}
         run: |
-          # 1. Python වලින් වීඩියෝ එක ඩවුන්ලෝඩ් කරනවා
           python3 -c "
           import os, requests
           voe_key = os.getenv('VOE_KEY')
@@ -49,10 +48,13 @@ jobs:
               r = requests.get(f'https://voe.sx/api/drive/v2/file/info?key={voe_key}&file_code={file_id}')
               url = r.json().get('result', {}).get('direct_url')
           
-          with requests.get(url, stream=True) as r:
-              with open('movie_mflix.mp4', 'wb') as f:
-                  for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
-          print('Download Complete!')
+          if url:
+              print(f'Downloading from: {url}')
+              with requests.get(url, stream=True) as r:
+                  with open('movie_mflix.mp4', 'wb') as f:
+                      for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
+              print('Download Complete!')
+          else:
+              print('Error: Could not get download URL')
           "
-          # 2. Node.js වලින් WhatsApp එකට යවනවා
           node send.js
