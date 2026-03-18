@@ -5,6 +5,7 @@ const zlib = require('zlib');
 const axios = require('axios');
 
 async function startBot() {
+    // 1. Session එක සකස් කිරීම (Gifted Session එක භාවිතා කරයි)
     if (!fs.existsSync('./auth_info')) fs.mkdirSync('./auth_info');
     const sessionData = process.env.SESSION_ID;
     
@@ -14,61 +15,91 @@ async function startBot() {
             const buffer = Buffer.from(base64Data, 'base64');
             const decodedSession = zlib.gunzipSync(buffer).toString();
             fs.writeFileSync('./auth_info/creds.json', decodedSession);
+            console.log("📂 Session Ready.");
         }
-    } catch (e) { console.log("❌ Session Error"); }
+    } catch (e) {
+        console.log("❌ Session Error: " + e.message);
+    }
 
     const { version } = await fetchLatestBaileysVersion();
     const { state, saveCreds } = await useMultiFileAuthState('./auth_info');
 
     const sock = makeWASocket({
-        auth: state, version,
+        auth: state,
+        version,
         logger: pino({ level: 'silent' }),
-        connectTimeoutMs: 120000
+        connectTimeoutMs: 120000,
+        defaultQueryTimeoutMs: 0
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // --- වීඩියෝ එක එවීමේ කොටස (GitHub Action මගින් ක්‍රියාත්මක වේ) ---
+    // 2. Connection එක ඕපන් වුණාම සිදුවන දේ
     sock.ev.on('connection.update', async (update) => {
-        if (update.connection === 'open') {
+        const { connection } = update;
+        if (connection === 'open') {
             console.log("✅ WhatsApp Connected!");
+
+            // --- GitHub Action එකෙන් එන Request එකක් නම් වීඩියෝ එක යවනවා ---
             const userJid = process.env.USER_JID;
             if (fs.existsSync('filename.txt') && userJid) {
-                const fileName = fs.readFileSync('filename.txt', 'utf8').trim();
-                if (fs.existsSync(`./${fileName}`)) {
+                const originalFileName = fs.readFileSync('filename.txt', 'utf8').trim();
+                const filePath = `./${originalFileName}`;
+
+                if (fs.existsSync(filePath)) {
+                    console.log(`📤 Sending Movie: ${originalFileName}`);
                     await sock.sendMessage(userJid, { 
-                        document: fs.readFileSync(`./${fileName}`), 
-                        mimetype: fileName.endsWith('.mkv') ? 'video/x-matroska' : 'video/mp4',
-                        fileName: fileName,
-                        caption: `🎬 *MFlix Video Delivery*\n\n*File:* ${fileName}`
+                        document: fs.readFileSync(filePath), 
+                        mimetype: originalFileName.endsWith('.mkv') ? 'video/x-matroska' : 'video/mp4',
+                        fileName: originalFileName,
+                        caption: `🎬 *MFlix Original Delivery*\n\n*Name:* ${originalFileName}\n\nරසවිඳින්න! 🍿`
                     });
-                    console.log("🚀 Sent!");
-                    await delay(5000);
+                    console.log("🚀 Successfully Sent!");
+                    await delay(10000);
                     process.exit(0);
                 }
             }
         }
     });
 
-    // --- යූසර්ගේ මැසේජ් එක අරන් Google Sheet එකට යවන කොටස ---
+    // 3. යූසර් එවන මැසේජ් වලට රිප්ලයි කිරීම (Trigger Logic)
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.fromMe) return;
+
         const from = msg.key.remoteJid;
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
 
+        // .tv [ID] චෙක් කිරීම
         if (text.startsWith('.tv')) {
-            const fileId = text.split(' ')[1];
-            if (!fileId) return sock.sendMessage(from, { text: "❌ ID එක ඇතුළත් කරන්න." });
+            const args = text.split(' ');
+            const fileId = args[1];
 
-            await sock.sendMessage(from, { text: "⏳ ඔබගේ ඉල්ලීම ලැබුණා. වීඩියෝව සූදානම් කරමින් පවතී..." });
+            if (!fileId) {
+                await sock.sendMessage(from, { text: "❌ කරුණාකර වීඩියෝ ID එක ඇතුළත් කරන්න.\nඋදා: *.tv 16WlbtOM...*" });
+                return;
+            }
+
+            await sock.sendMessage(from, { text: "⏳ ඔබගේ ඉල්ලීම පද්ධතියට ලැබුණා. වීඩියෝව සකසමින් පවතී, මඳක් රැඳී සිටින්න..." });
 
             try {
-                // මෙතනට ඔයාගේ Google Apps Script URL එක දාන්න
-                const scriptUrl = "ඔයාගේ_APPS_SCRIPT_URL_එක";
-                await axios.post(scriptUrl, { fileId: fileId, userJid: from });
-            } catch (err) { console.log("❌ Error triggering script"); }
+                // ⚠️ ඔයා අන්තිමට ගත්ත අලුත් Google Script URL එක මෙතනට පේස්ට් කරන්න
+                const scriptUrl = "https://script.google.com/macros/s/AKfycbzc3r7kkyAH6QhFLQyiEuI9ZAoAJuOJ9mkGDzgE8VmMHwkTcmdvguMsxDl3ThghmFC1/exec";
+
+                // Google Script එකට Trigger එක යවනවා
+                await axios.post(scriptUrl, {
+                    fileId: fileId,
+                    userJid: from
+                }, {
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                console.log(`✅ Triggered GitHub for: ${fileId}`);
+            } catch (error) {
+                console.error("❌ Trigger Error:", error.message);
+                await sock.sendMessage(from, { text: "⚠️ පද්ධතියේ දෝෂයක්. කරුණාකර පසුව උත්සාහ කරන්න." });
+            }
         }
     });
 }
+
 startBot();
